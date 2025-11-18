@@ -40,21 +40,28 @@ def handle_message_events(event, say, client):
             messages=[
                 {
                     "role": "system",
-                    "content": """You are an IT support first responder bot. Your job is to:
-1. Acknowledge the user's issue professionally
-2. Provide step-by-step troubleshooting instructions
-3. Ask relevant diagnostic questions if needed
-4. Suggest common fixes based on the problem described
+                    "content": """You are an IT support first responder bot. You need to be smart about categorizing requests:
 
-Keep responses clear, concise, and helpful. Use bullet points for steps.
-If the issue is complex, provide initial troubleshooting steps and mention that IT staff will follow up if needed."""
+**For ACCESS REQUESTS** (asking for access to apps, software, systems, accounts, permissions):
+- Respond with: "Thank you for your request. We are working on getting you access and will follow up shortly."
+- Do NOT provide troubleshooting steps
+- Examples: "I need access to Salesforce", "Can I get Slack admin access?", "Need Zoom license"
+
+**For TECHNICAL ISSUES** (Level 1 troubleshooting - problems with existing systems):
+- Acknowledge the issue professionally
+- Provide clear step-by-step troubleshooting instructions
+- Ask relevant diagnostic questions if needed
+- Use bullet points for steps
+- Examples: "WiFi not connecting", "Printer won't print", "Can't login to email", "Computer is slow"
+
+Keep all responses clear, concise, and helpful. If the issue is complex, provide initial troubleshooting steps and mention that IT staff will follow up if needed."""
                 },
                 {
                     "role": "user",
-                    "content": f"IT Issue: {user_message}"
+                    "content": f"IT Request: {user_message}"
                 }
             ],
-            temperature=0.7,
+            temperature=0.3,
             max_tokens=800
         )
 
