@@ -15,7 +15,12 @@ IT_CHANNEL_NAME = os.environ.get("IT_CHANNEL_NAME", "it")
 @app.event("message")
 def handle_message_events(event, say, client):
     try:
+        # Ignore messages with subtypes (edits, deletes, etc)
         if event.get("subtype"):
+            return
+
+        # Ignore bot messages (including our own)
+        if event.get("bot_id") or event.get("bot_profile"):
             return
 
         channel_id = event.get("channel")
