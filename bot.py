@@ -25,9 +25,8 @@ def handle_message_events(event, say, client):
         if event.get("bot_id") or event.get("bot_profile"):
             return
 
-        # Only respond to top-level messages (not already in a thread)
-        if event.get("thread_ts"):
-            return
+        # Check if this is a thread reply or new message
+        is_thread_reply = event.get("thread_ts") is not None and event.get("thread_ts") != event.get("ts")
 
         channel_id = event.get("channel")
         channel_info = client.conversations_info(channel=channel_id)
@@ -37,6 +36,78 @@ def handle_message_events(event, say, client):
             return
 
         user_message = event.get("text", "")
+
+        # Handle thread replies (follow-up messages)
+        if is_thread_reply:
+            thread_ts = event.get("thread_ts")
+            logger.info(f"Thread reply detected: {user_message}")
+
+            # Check if user needs more help using keywords
+            help_keywords = ["need help", "more help", "didn't work", "doesn't work", "not working",
+                           "still not", "still broken", "same problem", "same issue", "not fixed",
+                           "tried that", "already tried", "escalate", "still having"]
+
+            needs_help = any(keyword in user_message.lower() for keyword in help_keywords)
+
+            if needs_help:
+                logger.info("User needs additional help, providing follow-up response")
+
+                # Get thread history for context
+                try:
+                    replies = client.conversations_replies(
+                        channel=channel_id,
+                        ts=thread_ts,
+                        limit=10
+                    )
+
+                    # Build context from previous messages
+                    context_messages = []
+                    for msg in replies.get("messages", [])[:5]:  # Last 5 messages for context
+                        role = "assistant" if msg.get("bot_id") else "user"
+                        context_messages.append({
+                            "role": role,
+                            "content": msg.get("text", "")
+                        })
+
+                    # Add system message
+                    context_messages.insert(0, {
+                        "role": "system",
+                        "content": """You are an IT support bot helping with a follow-up question. The user tried the previous troubleshooting steps but still needs help. Provide:
+1. Alternative solutions or more advanced troubleshooting
+2. Ask clarifying questions about what they've tried
+3. If the issue seems complex, suggest escalating to IT team
+Keep responses concise and helpful."""
+                    })
+
+                    # Add current message
+                    context_messages.append({
+                        "role": "user",
+                        "content": user_message
+                    })
+
+                    # Get follow-up response from ChatGPT
+                    response = openai_client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=context_messages,
+                        temperature=0.3,
+                        max_tokens=500
+                    )
+
+                    follow_up_response = response.choices[0].message.content
+
+                    say(
+                        text=f"{follow_up_response}\n\n💡 **Tip:** You can also react with 👎 on my previous message to escalate to the assigned IT team member.",
+                        thread_ts=thread_ts
+                    )
+
+                    logger.info("Follow-up response sent")
+
+                except Exception as e:
+                    logger.error(f"Error providing follow-up: {str(e)}")
+
+            return  # Don't continue to new ticket processing
+
+        # Handle new top-level messages
         thread_ts = event.get("ts")
 
         logger.info(f"New IT ticket detected: {user_message}")
