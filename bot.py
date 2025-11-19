@@ -14,6 +14,53 @@ openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 IT_CHANNEL_NAME = os.environ.get("IT_CHANNEL_NAME", "it")
 
+def get_similar_past_tickets(client, channel_id, user_message, limit=5):
+    """Search past IT tickets for similar issues and resolutions"""
+    try:
+        # Get recent messages from the channel (last 100 messages)
+        history = client.conversations_history(
+            channel=channel_id,
+            limit=100
+        )
+
+        # Look for threads that might contain resolutions
+        similar_tickets = []
+        for message in history.get("messages", []):
+            msg_text = message.get("text", "").lower()
+
+            # Check if this ticket is similar to the current issue
+            # Simple keyword matching (could be enhanced with embeddings)
+            user_keywords = set(user_message.lower().split())
+            msg_keywords = set(msg_text.split())
+
+            # If there's significant overlap, consider it similar
+            overlap = len(user_keywords & msg_keywords)
+            if overlap >= 2 and message.get("thread_ts"):
+                # Get the thread to see resolution
+                try:
+                    thread = client.conversations_replies(
+                        channel=channel_id,
+                        ts=message.get("ts"),
+                        limit=10
+                    )
+
+                    thread_messages = thread.get("messages", [])
+                    if len(thread_messages) > 2:  # Has conversation/resolution
+                        similar_tickets.append({
+                            "issue": msg_text[:200],
+                            "thread": thread_messages[:5]
+                        })
+                except:
+                    pass
+
+            if len(similar_tickets) >= limit:
+                break
+
+        return similar_tickets
+    except Exception as e:
+        logger.error(f"Error fetching past tickets: {str(e)}")
+        return []
+
 @app.event("message")
 def handle_message_events(event, say, client):
     try:
@@ -76,10 +123,10 @@ def handle_message_events(event, say, client):
                 # Add system message with escalation instructions
                 context_messages.insert(0, {
                     "role": "system",
-                    "content": f"""You are an intelligent IT support chatbot having a natural conversation with a user about their IT issue.
+                    "content": f"""You are TheGuarantors IT Support Bot, having a natural conversation with a TheGuarantors employee about their IT issue.
 
 Your goals:
-1. Have a helpful, conversational dialogue (not robotic)
+1. Have a helpful, friendly conversational dialogue (not robotic) - represent TheGuarantors' supportive culture
 2. Ask clarifying questions to understand the problem better
 3. Provide step-by-step guidance based on what they tell you
 4. Remember what they've already tried (from conversation history)
@@ -176,26 +223,39 @@ After 2-3 failed attempts or when user seems stuck, always escalate."""
 
         logger.info(f"Processing IT ticket: {user_message}")
 
+        # Get similar past tickets for context
+        past_tickets = get_similar_past_tickets(client, channel_id, user_message, limit=3)
+        past_context = ""
+        if past_tickets:
+            past_context = "\n\n**Past Similar Tickets:**\n"
+            for i, ticket in enumerate(past_tickets, 1):
+                past_context += f"{i}. Issue: {ticket['issue'][:100]}...\n"
+
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {
                     "role": "system",
-                    "content": """You are an IT support first responder bot. You need to be smart about categorizing requests:
+                    "content": f"""You are TheGuarantors IT Support Bot - the first responder for IT issues at TheGuarantors.
+
+**Company Context:**
+- You're helping TheGuarantors employees with their IT needs
+- Be professional, friendly, and efficient
+- Follow TheGuarantors IT team's approach to troubleshooting{past_context}
 
 **For ACCESS REQUESTS** (asking for access to apps, software, systems, accounts, permissions):
-- Respond with: "Thank you for your request. We are working on getting you access and will follow up shortly."
+- Respond with: "Thank you for your request! Our IT team is working on getting you access and will follow up shortly."
 - Do NOT provide troubleshooting steps
 - Examples: "I need access to Salesforce", "Can I get Slack admin access?", "Need Zoom license"
 
-**For TECHNICAL ISSUES** (Level 1 troubleshooting - problems with existing systems):
-- Acknowledge the issue professionally
+**For TECHNICAL ISSUES** (Level 1 troubleshooting):
+- Acknowledge the issue professionally with TheGuarantors' friendly tone
 - Provide clear step-by-step troubleshooting instructions
+- Reference similar past tickets if relevant
 - Ask relevant diagnostic questions if needed
 - Use bullet points for steps
-- Examples: "WiFi not connecting", "Printer won't print", "Can't login to email", "Computer is slow"
 
-Keep all responses clear, concise, and helpful. If the issue is complex, provide initial troubleshooting steps and mention that IT staff will follow up if needed."""
+Keep all responses clear, concise, and helpful. If the issue is complex, provide initial troubleshooting steps and mention that the IT team will follow up if needed."""
                 },
                 {
                     "role": "user",
