@@ -37,73 +37,88 @@ def handle_message_events(event, say, client):
 
         user_message = event.get("text", "")
 
-        # Handle thread replies (follow-up messages)
+        # Handle thread replies (follow-up messages) - respond to ALL user messages
         if is_thread_reply:
             thread_ts = event.get("thread_ts")
-            logger.info(f"Thread reply detected: {user_message}")
+            logger.info(f"Thread conversation: {user_message}")
 
-            # Check if user needs more help using keywords
-            help_keywords = ["need help", "more help", "didn't work", "doesn't work", "not working",
-                           "still not", "still broken", "same problem", "same issue", "not fixed",
-                           "tried that", "already tried", "escalate", "still having"]
+            # Get thread history for context
+            try:
+                replies = client.conversations_replies(
+                    channel=channel_id,
+                    ts=thread_ts,
+                    limit=20
+                )
 
-            needs_help = any(keyword in user_message.lower() for keyword in help_keywords)
+                # Find assignee from Assist bot message
+                assignee_mention = None
+                for msg in replies.get("messages", []):
+                    text = msg.get("text", "")
+                    if "Assignee:" in text or "assignee" in text.lower():
+                        # Extract user mention if present
+                        user_match = re.search(r'<@(\w+)>', text)
+                        if user_match:
+                            assignee_mention = f"<@{user_match.group(1)}>"
+                        break
 
-            if needs_help:
-                logger.info("User needs additional help, providing follow-up response")
-
-                # Get thread history for context
-                try:
-                    replies = client.conversations_replies(
-                        channel=channel_id,
-                        ts=thread_ts,
-                        limit=10
-                    )
-
-                    # Build context from previous messages
-                    context_messages = []
-                    for msg in replies.get("messages", [])[:5]:  # Last 5 messages for context
-                        role = "assistant" if msg.get("bot_id") else "user"
+                # Build conversation context
+                context_messages = []
+                for msg in replies.get("messages", []):
+                    role = "assistant" if msg.get("bot_id") else "user"
+                    msg_text = msg.get("text", "")
+                    # Clean up the message (remove reaction instructions)
+                    if "**Did this help?**" not in msg_text:
                         context_messages.append({
                             "role": role,
-                            "content": msg.get("text", "")
+                            "content": msg_text
                         })
 
-                    # Add system message
-                    context_messages.insert(0, {
-                        "role": "system",
-                        "content": """You are an IT support bot helping with a follow-up question. The user tried the previous troubleshooting steps but still needs help. Provide:
-1. Alternative solutions or more advanced troubleshooting
-2. Ask clarifying questions about what they've tried
-3. If the issue seems complex, suggest escalating to IT team
-Keep responses concise and helpful."""
-                    })
+                # Add system message with escalation instructions
+                escalation_info = f" When the issue seems too complex or the user has tried multiple things without success, suggest: 'It looks like this needs more specialized help. Let me escalate this to {assignee_mention if assignee_mention else 'the IT team'} who can assist you further.'" if assignee_mention else ""
 
-                    # Add current message
-                    context_messages.append({
-                        "role": "user",
-                        "content": user_message
-                    })
+                context_messages.insert(0, {
+                    "role": "system",
+                    "content": f"""You are an intelligent IT support chatbot having a natural conversation with a user about their IT issue.
 
-                    # Get follow-up response from ChatGPT
-                    response = openai_client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=context_messages,
-                        temperature=0.3,
-                        max_tokens=500
-                    )
+Your goals:
+1. Have a helpful, conversational dialogue (not robotic)
+2. Ask clarifying questions to understand the problem better
+3. Provide step-by-step guidance based on what they tell you
+4. Remember what they've already tried (from conversation history)
+5. If the issue persists after 2-3 troubleshooting attempts, or seems complex, suggest escalation{escalation_info}
 
-                    follow_up_response = response.choices[0].message.content
+Be conversational, empathetic, and helpful. Keep responses concise (3-5 sentences max)."""
+                })
 
-                    say(
-                        text=f"{follow_up_response}\n\n💡 **Tip:** You can also react with 👎 on my previous message to escalate to the assigned IT team member.",
-                        thread_ts=thread_ts
-                    )
+                # Add current user message
+                context_messages.append({
+                    "role": "user",
+                    "content": user_message
+                })
 
-                    logger.info("Follow-up response sent")
+                # Get ChatGPT response
+                response = openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=context_messages,
+                    temperature=0.7,
+                    max_tokens=400
+                )
 
-                except Exception as e:
-                    logger.error(f"Error providing follow-up: {str(e)}")
+                chat_response = response.choices[0].message.content
+
+                # If suggesting escalation, actually mention the assignee
+                if "escalate" in chat_response.lower() and assignee_mention:
+                    chat_response = chat_response.replace("the IT team", assignee_mention).replace("IT team", assignee_mention)
+
+                say(
+                    text=chat_response,
+                    thread_ts=thread_ts
+                )
+
+                logger.info("Conversation response sent")
+
+            except Exception as e:
+                logger.error(f"Error in conversation: {str(e)}")
 
             return  # Don't continue to new ticket processing
 
