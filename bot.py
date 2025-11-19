@@ -1,6 +1,7 @@
 import os
 import logging
 import time
+import re
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from openai import OpenAI
@@ -108,8 +109,11 @@ Keep all responses clear, concise, and helpful. If the issue is complex, provide
 
         ai_response = response.choices[0].message.content
 
+        # Add feedback instructions
+        feedback_text = f"{ai_response}\n\n---\n**Did this help?**\n• React with :thumbsup: if the issue is resolved\n• React with :thumbsdown: if you need further assistance (I'll escalate to the assigned IT team member)"
+
         say(
-            text=ai_response,
+            text=feedback_text,
             thread_ts=thread_ts
         )
 
@@ -121,6 +125,67 @@ Keep all responses clear, concise, and helpful. If the issue is complex, provide
             text="I encountered an error processing your request. An IT team member will assist you shortly.",
             thread_ts=event.get("thread_ts") or event.get("ts")
         )
+
+@app.event("reaction_added")
+def handle_reaction(event, client, say):
+    try:
+        reaction = event.get("reaction")
+        item = event.get("item", {})
+        channel = item.get("channel")
+        message_ts = item.get("ts")
+        user = event.get("user")
+
+        # Only handle thumbs down reactions
+        if reaction not in ["-1", "thumbsdown"]:
+            return
+
+        logger.info(f"Thumbs down reaction detected from user {user}")
+
+        # Get the thread messages to find the Assist bot message
+        thread_ts = message_ts
+        replies = client.conversations_replies(
+            channel=channel,
+            ts=thread_ts,
+            limit=20
+        )
+
+        # Find the Assist bot message with assignee info
+        assignee_name = None
+        for message in replies.get("messages", []):
+            text = message.get("text", "")
+            # Look for "Assignee:" pattern in Assist bot message
+            if "Assignee:" in text or "assignee" in text.lower():
+                # Try to extract the assignee name
+                # Pattern to match "Assignee: Name" or links to users
+                match = re.search(r'Assignee:\s*([^\n]+)', text)
+                if match:
+                    assignee_text = match.group(1).strip()
+                    # Extract user mention if present
+                    user_match = re.search(r'<@(\w+)>', assignee_text)
+                    if user_match:
+                        assignee_name = f"<@{user_match.group(1)}>"
+                    else:
+                        # Try to find a name (first word after "Assignee:")
+                        name_match = re.search(r'Assignee:\s*(\S+\s+\S+)', text)
+                        if name_match:
+                            assignee_name = name_match.group(1).strip()
+                    break
+
+        # Post escalation message
+        if assignee_name:
+            escalation_msg = f"🔴 **Issue needs escalation**\n\n<@{user}> indicated that the troubleshooting steps didn't resolve the issue.\n\n{assignee_name}, this ticket needs your attention."
+        else:
+            escalation_msg = f"🔴 **Issue needs escalation**\n\n<@{user}> indicated that the troubleshooting steps didn't resolve the issue.\n\nIT team, this ticket needs further assistance."
+
+        say(
+            text=escalation_msg,
+            thread_ts=thread_ts
+        )
+
+        logger.info("Escalation message sent")
+
+    except Exception as e:
+        logger.error(f"Error handling reaction: {str(e)}")
 
 @app.event("app_mention")
 def handle_mentions(event, say):
