@@ -74,8 +74,6 @@ def handle_message_events(event, say, client):
                         })
 
                 # Add system message with escalation instructions
-                escalation_info = f" When the issue seems too complex or the user has tried multiple things without success, suggest: 'It looks like this needs more specialized help. Let me escalate this to {assignee_mention if assignee_mention else 'the IT team'} who can assist you further.'" if assignee_mention else ""
-
                 context_messages.insert(0, {
                     "role": "system",
                     "content": f"""You are an intelligent IT support chatbot having a natural conversation with a user about their IT issue.
@@ -85,9 +83,11 @@ Your goals:
 2. Ask clarifying questions to understand the problem better
 3. Provide step-by-step guidance based on what they tell you
 4. Remember what they've already tried (from conversation history)
-5. If the issue persists after 2-3 troubleshooting attempts, or seems complex, suggest escalation{escalation_info}
+5. If the issue persists after troubleshooting, or seems complex, or user is uncertain, ALWAYS suggest escalation
+6. When escalating, say: "I'm going to escalate this to the IT team who can help you further."
 
-Be conversational, empathetic, and helpful. Keep responses concise (3-5 sentences max)."""
+Be conversational, empathetic, and helpful. Keep responses concise (3-5 sentences max).
+After 2-3 failed attempts or when user seems stuck, always escalate."""
                 })
 
                 # Add current user message
@@ -106,9 +106,22 @@ Be conversational, empathetic, and helpful. Keep responses concise (3-5 sentence
 
                 chat_response = response.choices[0].message.content
 
-                # If suggesting escalation, actually mention the assignee
-                if "escalate" in chat_response.lower() and assignee_mention:
-                    chat_response = chat_response.replace("the IT team", assignee_mention).replace("IT team", assignee_mention)
+                # Detect if user is stuck or uncertain
+                stuck_keywords = ["didn't work", "doesn't work", "not working", "still", "same",
+                                "don't know", "not sure", "uncertain", "confused", "tried everything"]
+                user_is_stuck = any(keyword in user_message.lower() for keyword in stuck_keywords)
+
+                # If escalating or user is stuck, add feedback option and mention assignee
+                if "escalat" in chat_response.lower() or user_is_stuck:
+                    if assignee_mention:
+                        # Mention the assignee in escalation
+                        if "escalat" in chat_response.lower():
+                            chat_response = chat_response.replace("the IT team", assignee_mention).replace("IT team", assignee_mention)
+
+                        # Add escalation option with thumbs down
+                        chat_response += f"\n\n---\n**Need help from the team?**\nReact with 👎 to this message and I'll escalate to {assignee_mention} immediately."
+                    else:
+                        chat_response += "\n\n---\n**Need help from the team?**\nReact with 👎 to this message and I'll escalate to the IT team immediately."
 
                 say(
                     text=chat_response,
@@ -195,11 +208,9 @@ Keep all responses clear, concise, and helpful. If the issue is complex, provide
 
         ai_response = response.choices[0].message.content
 
-        # Add feedback instructions
-        feedback_text = f"{ai_response}\n\n---\n**Did this help?**\n• React with :thumbsup: if the issue is resolved\n• React with :thumbsdown: if you need further assistance (I'll escalate to the assigned IT team member)"
-
+        # Don't add automatic feedback - let conversation flow naturally
         say(
-            text=feedback_text,
+            text=ai_response,
             thread_ts=thread_ts
         )
 
