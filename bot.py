@@ -39,10 +39,40 @@ def handle_message_events(event, say, client):
         thread_ts = event.get("ts")
 
         logger.info(f"New IT ticket detected: {user_message}")
-        logger.info("Waiting 10 seconds for Assist bot to respond first...")
+        logger.info("Waiting for Assist bot to respond first...")
 
-        # Wait 10 seconds to let Assist bot create the thread first
-        time.sleep(10)
+        # Wait for Assist bot to respond (check every 2 seconds, max 20 seconds)
+        assist_responded = False
+        max_attempts = 10  # 10 attempts x 2 seconds = 20 seconds max
+
+        for attempt in range(max_attempts):
+            time.sleep(2)
+
+            # Check if there are any replies in the thread
+            try:
+                replies = client.conversations_replies(
+                    channel=channel_id,
+                    ts=thread_ts,
+                    limit=10
+                )
+
+                # Look for Assist bot's response
+                for message in replies.get("messages", []):
+                    if message.get("bot_id") or message.get("app_id"):
+                        # Found a bot response, assume it's Assist
+                        logger.info(f"Assist bot responded (attempt {attempt + 1})")
+                        assist_responded = True
+                        break
+
+                if assist_responded:
+                    break
+
+            except Exception as e:
+                logger.error(f"Error checking for Assist response: {str(e)}")
+                break
+
+        if not assist_responded:
+            logger.warning("Assist bot didn't respond within 20 seconds, responding anyway")
 
         logger.info(f"Processing IT ticket: {user_message}")
 
