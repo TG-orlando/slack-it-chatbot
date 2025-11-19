@@ -1,5 +1,6 @@
 import os
 import logging
+import time
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from openai import OpenAI
@@ -23,6 +24,10 @@ def handle_message_events(event, say, client):
         if event.get("bot_id") or event.get("bot_profile"):
             return
 
+        # Only respond to top-level messages (not already in a thread)
+        if event.get("thread_ts"):
+            return
+
         channel_id = event.get("channel")
         channel_info = client.conversations_info(channel=channel_id)
         channel_name = channel_info["channel"]["name"]
@@ -31,7 +36,13 @@ def handle_message_events(event, say, client):
             return
 
         user_message = event.get("text", "")
-        thread_ts = event.get("thread_ts") or event.get("ts")
+        thread_ts = event.get("ts")
+
+        logger.info(f"New IT ticket detected: {user_message}")
+        logger.info("Waiting 5 seconds for Assist bot to respond first...")
+
+        # Wait 5 seconds to let Assist bot create the thread first
+        time.sleep(5)
 
         logger.info(f"Processing IT ticket: {user_message}")
 
