@@ -39,10 +39,10 @@ def handle_message_events(event, say, client):
         thread_ts = event.get("ts")
 
         logger.info(f"New IT ticket detected: {user_message}")
-        logger.info("Waiting 5 seconds for Assist bot to respond first...")
+        logger.info("Waiting 10 seconds for Assist bot to respond first...")
 
-        # Wait 5 seconds to let Assist bot create the thread first
-        time.sleep(5)
+        # Wait 10 seconds to let Assist bot create the thread first
+        time.sleep(10)
 
         logger.info(f"Processing IT ticket: {user_message}")
 
