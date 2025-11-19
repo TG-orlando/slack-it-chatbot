@@ -154,7 +154,12 @@ Your goals:
 3. Provide troubleshooting specific to TheGuarantors' tech stack (Okta, Gmail, Jamf, 1Password, AWS ClientVPN, etc.)
 4. Remember what they've already tried (from conversation history)
 5. If the issue persists after troubleshooting, or seems complex, or user is uncertain, ALWAYS suggest escalation
-6. When escalating, say: "I'm going to escalate this to the IT team who can help you further."
+6. When escalating, say: "Let me escalate this to TheGuarantors IT team who can help you further."
+
+**IMPORTANT RULES:**
+- NEVER suggest: creating a ticket, emailing IT, reaching out, or contacting external support
+- ONLY mention: TheGuarantors IT team (never "the IT team" - always "TheGuarantors IT team")
+- For escalation: ONLY suggest using the thumbs down emoji (👎)
 
 Be conversational, empathetic, and helpful. Keep responses concise (3-5 sentences max).
 After 2-3 failed attempts or when user seems stuck, always escalate."""
@@ -186,12 +191,12 @@ After 2-3 failed attempts or when user seems stuck, always escalate."""
                     if assignee_mention:
                         # Mention the assignee in escalation
                         if "escalat" in chat_response.lower():
-                            chat_response = chat_response.replace("the IT team", assignee_mention).replace("IT team", assignee_mention)
+                            chat_response = chat_response.replace("the IT team", assignee_mention).replace("IT team", assignee_mention).replace("TheGuarantors IT team", assignee_mention)
 
                         # Add escalation option with thumbs down
-                        chat_response += f"\n\n---\n**Need help from the team?**\nReact with 👎 to this message and I'll escalate to {assignee_mention} immediately."
+                        chat_response += f"\n\n---\n**Need help from TheGuarantors IT?**\nReact with 👎 to this message and I'll escalate to {assignee_mention} immediately."
                     else:
-                        chat_response += "\n\n---\n**Need help from the team?**\nReact with 👎 to this message and I'll escalate to the IT team immediately."
+                        chat_response += "\n\n---\n**Need help from TheGuarantors IT?**\nReact with 👎 to this message and I'll escalate to TheGuarantors IT team immediately."
 
                 say(
                     text=chat_response,
@@ -254,6 +259,48 @@ After 2-3 failed attempts or when user seems stuck, always escalate."""
             for i, ticket in enumerate(past_tickets, 1):
                 past_context += f"{i}. Issue: {ticket['issue'][:100]}...\n"
 
+        # Check if this is a change request (not a technical issue)
+        change_keywords = ["change", "update my", "modify", "edit my", "adjust", "configure",
+                          "set up", "setup", "install", "add me", "remove me", "switch",
+                          "device", "settings", "preferences", "configuration"]
+        is_change_request = any(keyword in user_message.lower() for keyword in change_keywords)
+
+        # Get assignee from Assist message for change requests
+        assignee_mention = None
+        if is_change_request:
+            time.sleep(3)  # Wait for Assist to post
+            try:
+                replies = client.conversations_replies(
+                    channel=channel_id,
+                    ts=thread_ts,
+                    limit=10
+                )
+                for message in replies.get("messages", []):
+                    text = message.get("text", "")
+                    if "Assignee:" in text or "assignee" in text.lower():
+                        user_match = re.search(r'<@(\w+)>', text)
+                        if user_match:
+                            assignee_mention = f"<@{user_match.group(1)}>"
+                        break
+            except:
+                pass
+
+        # If it's a change request, provide simple acknowledgment
+        if is_change_request and assignee_mention:
+            say(
+                text=f"Thank you! We have received your request. {assignee_mention} is working on this and will reach out shortly.",
+                thread_ts=thread_ts
+            )
+            logger.info("Change request acknowledged")
+            return
+        elif is_change_request:
+            say(
+                text="Thank you! We have received your request. Our IT team is working on this and will reach out shortly.",
+                thread_ts=thread_ts
+            )
+            logger.info("Change request acknowledged")
+            return
+
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -270,8 +317,8 @@ After 2-3 failed attempts or when user seems stuck, always escalate."""
 - Follow TheGuarantors IT team's approach to troubleshooting{past_context}
 
 **For ACCESS REQUESTS** (asking for access to apps like Snowflake, GitHub, Figma, Jira, etc.):
-- Respond with: "Thank you for your access request! Our IT team is provisioning your access and will follow up shortly."
-- Mention if it requires manager approval or specific onboarding
+- Respond with: "Thank you for your access request! TheGuarantors IT team is provisioning your access and will follow up shortly."
+- Do NOT suggest creating tickets, emailing, or reaching out
 - Do NOT provide troubleshooting steps
 - Examples: "I need Snowflake access", "Can I get GitHub Enterprise added?", "Need Figma license"
 
@@ -282,8 +329,11 @@ After 2-3 failed attempts or when user seems stuck, always escalate."""
 - For VPN: mention AWS ClientVPN
 - For email: mention Gmail/Google Workspace
 - Use bullet points for steps
+- NEVER mention: creating tickets, emailing IT, reaching out, external support
+- ONLY mention TheGuarantors IT team
+- For escalation: ONLY say "React with 👎 to escalate to TheGuarantors IT team"
 
-Keep responses clear, concise, and helpful. If complex, provide initial troubleshooting and mention the IT team will follow up."""
+Keep responses clear, concise, and helpful. NEVER suggest creating tickets or emailing - only thumbs down emoji for escalation."""
                 },
                 {
                     "role": "user",
@@ -360,7 +410,7 @@ def handle_reaction(event, client, say):
         if assignee_name:
             escalation_msg = f"🔴 **Issue needs escalation**\n\n<@{user}> indicated that the troubleshooting steps didn't resolve the issue.\n\n{assignee_name}, this ticket needs your attention."
         else:
-            escalation_msg = f"🔴 **Issue needs escalation**\n\n<@{user}> indicated that the troubleshooting steps didn't resolve the issue.\n\nIT team, this ticket needs further assistance."
+            escalation_msg = f"🔴 **Issue needs escalation**\n\n<@{user}> indicated that the troubleshooting steps didn't resolve the issue.\n\nTheGuarantors IT team, this ticket needs further assistance."
 
         say(
             text=escalation_msg,
