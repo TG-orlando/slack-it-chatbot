@@ -2,9 +2,12 @@ import os
 import logging
 import time
 import re
+from datetime import datetime
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from openai import OpenAI
+from apscheduler.schedulers.background import BackgroundScheduler
+import metrics
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -14,6 +17,30 @@ openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 IT_CHANNEL_NAME = os.environ.get("IT_CHANNEL_NAME", "it")
 BOT_NAME = "IT AI Support"
+
+# Initialize scheduler for weekly reports
+scheduler = BackgroundScheduler()
+
+def schedule_weekly_report():
+    """Schedule weekly report generation"""
+    try:
+        # Get channel ID for IT channel
+        result = app.client.conversations_list()
+        channels = result.get("channels", [])
+        channel_id = None
+
+        for channel in channels:
+            if channel.get("name") == IT_CHANNEL_NAME:
+                channel_id = channel.get("id")
+                break
+
+        if channel_id:
+            metrics.generate_and_post_weekly_report(app.client, channel_id, post_to_slack=True)
+        else:
+            logger.error(f"Could not find channel: {IT_CHANNEL_NAME}")
+
+    except Exception as e:
+        logger.error(f"Error in scheduled report: {str(e)}")
 
 # TheGuarantors IT Environment
 THEGUARANTORS_TOOLS = """
@@ -424,11 +451,37 @@ def handle_reaction(event, client, say):
         logger.error(f"Error handling reaction: {str(e)}")
 
 @app.event("app_mention")
-def handle_mentions(event, say):
+def handle_mentions(event, say, client):
     user_id = event["user"]
-    say(f"Hi <@{user_id}>! I'm monitoring all messages in the IT channel and will respond with helpful suggestions automatically. Just post your IT issue and I'll help troubleshoot!")
+    message_text = event.get("text", "").lower()
+
+    # Check if user is requesting a report
+    if "report" in message_text or "metrics" in message_text or "stats" in message_text:
+        say(f"Generating weekly metrics report... This may take a moment.")
+
+        # Get channel ID
+        channel_id = event.get("channel")
+        success = metrics.generate_and_post_weekly_report(client, channel_id, post_to_slack=True)
+
+        if success:
+            say(f"✅ Report generated and committed to GitHub!")
+        else:
+            say(f"❌ Error generating report. Check logs for details.")
+    else:
+        say(f"Hi <@{user_id}>! I'm monitoring all messages in the IT channel and will respond with helpful suggestions automatically. Just post your IT issue and I'll help troubleshoot!\n\n💡 **Tip:** Mention me with 'report' or 'metrics' to generate a weekly performance report.")
 
 if __name__ == "__main__":
+    # Schedule weekly reports (every Monday at 9 AM)
+    scheduler.add_job(
+        schedule_weekly_report,
+        'cron',
+        day_of_week='mon',
+        hour=9,
+        minute=0
+    )
+    scheduler.start()
+    logger.info("Weekly report scheduler started (runs every Monday at 9 AM)")
+
     handler = SocketModeHandler(app, os.environ.get("SLACK_APP_TOKEN"))
     logger.info(f"{BOT_NAME} is starting...")
     handler.start()
