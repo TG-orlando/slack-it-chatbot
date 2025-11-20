@@ -13,6 +13,7 @@ app = App(token=os.environ.get("SLACK_BOT_TOKEN"))
 openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 IT_CHANNEL_NAME = os.environ.get("IT_CHANNEL_NAME", "it")
+BOT_NAME = "IT AI Support"
 
 # TheGuarantors IT Environment
 THEGUARANTORS_TOOLS = """
@@ -144,7 +145,7 @@ def handle_message_events(event, say, client):
                 # Add system message with escalation instructions
                 context_messages.insert(0, {
                     "role": "system",
-                    "content": f"""You are TheGuarantors IT Support Bot, having a natural conversation with a TheGuarantors employee about their IT issue.
+                    "content": f"""You are IT AI Support, having a natural conversation with a TheGuarantors employee about their IT issue.
 
 {THEGUARANTORS_TOOLS}
 
@@ -306,7 +307,7 @@ After 2-3 failed attempts or when user seems stuck, always escalate."""
             messages=[
                 {
                     "role": "system",
-                    "content": f"""You are TheGuarantors IT Support Bot - the first responder for IT issues at TheGuarantors.
+                    "content": f"""You are IT AI Support - the first responder for IT issues at TheGuarantors.
 
 {THEGUARANTORS_TOOLS}
 
@@ -429,5 +430,5 @@ def handle_mentions(event, say):
 
 if __name__ == "__main__":
     handler = SocketModeHandler(app, os.environ.get("SLACK_APP_TOKEN"))
-    logger.info("IT Support Bot is starting...")
+    logger.info(f"{BOT_NAME} is starting...")
     handler.start()
