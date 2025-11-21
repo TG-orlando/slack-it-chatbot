@@ -243,17 +243,27 @@ After 2-3 failed attempts or when user seems stuck, always escalate."""
                                 "don't know", "not sure", "uncertain", "confused", "tried everything"]
                 user_is_stuck = any(keyword in user_message.lower() for keyword in stuck_keywords)
 
-                # If escalating or user is stuck, add feedback option and mention assignee
-                if "escalat" in chat_response.lower() or user_is_stuck:
-                    if assignee_mention:
-                        # Mention the assignee in escalation
-                        if "escalat" in chat_response.lower():
-                            chat_response = chat_response.replace("the IT team", assignee_mention).replace("IT team", assignee_mention).replace("TheGuarantors IT team", assignee_mention)
+                # Always add follow-up options after troubleshooting
+                if assignee_mention:
+                    # Mention the assignee in escalation option
+                    if "escalat" in chat_response.lower():
+                        chat_response = chat_response.replace("the IT team", assignee_mention).replace("IT team", assignee_mention).replace("TheGuarantors IT team", assignee_mention)
 
-                        # Add escalation option with thumbs down
-                        chat_response += f"\n\n---\n**Need help from TheGuarantors IT?**\nReact with 👎 to this message and I'll escalate to {assignee_mention} immediately."
-                    else:
-                        chat_response += "\n\n---\n**Need help from TheGuarantors IT?**\nReact with 👎 to this message and I'll escalate to TheGuarantors IT team immediately."
+                    chat_response += f"""
+
+---
+**Did this help resolve your issue?**
+• ✅ If yes, let me know and I'll close this out!
+• 💬 If not, tell me what's happening and I'll try another solution
+• 👎 React with thumbs down to escalate to {assignee_mention}"""
+                else:
+                    chat_response += """
+
+---
+**Did this help resolve your issue?**
+• ✅ If yes, let me know and I'll close this out!
+• 💬 If not, tell me what's happening and I'll try another solution
+• 👎 React with thumbs down to escalate to TheGuarantors IT team"""
 
                 say(
                     text=chat_response,
@@ -403,9 +413,44 @@ Keep responses clear, concise, and helpful. NEVER suggest creating tickets or em
 
         ai_response = response.choices[0].message.content
 
-        # Don't add automatic feedback - let conversation flow naturally
+        # Get assignee from Assist message for escalation option
+        assignee_for_escalation = None
+        try:
+            replies = client.conversations_replies(
+                channel=channel_id,
+                ts=thread_ts,
+                limit=10
+            )
+            for msg in replies.get("messages", []):
+                text = msg.get("text", "")
+                if "Assignee:" in text or "assignee" in text.lower():
+                    user_match = re.search(r'<@(\w+)>', text)
+                    if user_match:
+                        assignee_for_escalation = f"<@{user_match.group(1)}>"
+                    break
+        except:
+            pass
+
+        # Add follow-up question with options
+        if assignee_for_escalation:
+            followup_text = f"""{ai_response}
+
+---
+**Did this help resolve your issue?**
+• ✅ If yes, let me know and I'll close this out!
+• 💬 If not, tell me what's happening and I'll try another solution
+• 👎 React with thumbs down to escalate to {assignee_for_escalation}"""
+        else:
+            followup_text = f"""{ai_response}
+
+---
+**Did this help resolve your issue?**
+• ✅ If yes, let me know and I'll close this out!
+• 💬 If not, tell me what's happening and I'll try another solution
+• 👎 React with thumbs down to escalate to TheGuarantors IT team"""
+
         say(
-            text=ai_response,
+            text=followup_text,
             thread_ts=thread_ts
         )
 
