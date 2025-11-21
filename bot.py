@@ -133,10 +133,11 @@ def handle_message_events(event, say, client):
 
         user_message = event.get("text", "")
 
-        # Handle thread replies (follow-up messages) - respond to ALL user messages
+        # Handle thread replies (follow-up messages)
         if is_thread_reply:
             thread_ts = event.get("thread_ts")
-            logger.info(f"Thread conversation: {user_message}")
+            current_user = event.get("user")
+            logger.info(f"Thread conversation from {current_user}: {user_message}")
 
             # Get thread history for context
             try:
@@ -146,16 +147,44 @@ def handle_message_events(event, say, client):
                     limit=20
                 )
 
-                # Find assignee from Assist bot message
+                # Find the original ticket creator (first message in thread)
+                original_creator = None
                 assignee_mention = None
+                assignee_user_id = None
+
                 for msg in replies.get("messages", []):
+                    # First non-bot message is the ticket creator
+                    if not msg.get("bot_id") and original_creator is None:
+                        original_creator = msg.get("user")
+
+                    # Find assignee from Assist bot message
                     text = msg.get("text", "")
                     if "Assignee:" in text or "assignee" in text.lower():
-                        # Extract user mention if present
                         user_match = re.search(r'<@(\w+)>', text)
                         if user_match:
-                            assignee_mention = f"<@{user_match.group(1)}>"
-                        break
+                            assignee_user_id = user_match.group(1)
+                            assignee_mention = f"<@{assignee_user_id}>"
+
+                # Only respond to the ORIGINAL ticket creator, not assignee or other users
+                if current_user != original_creator:
+                    logger.info(f"Message from non-creator ({current_user}), not responding. Original creator: {original_creator}")
+                    return
+
+                # Check if this is a "thank you" / "got access" / completion message
+                completion_keywords = ["thank you", "thanks", "got it", "works now", "working now",
+                                      "all good", "all set", "have access", "got access", "resolved",
+                                      "fixed", "working", "perfect", "great", "awesome", "appreciate",
+                                      "sorted", "done", "completed", "solved"]
+
+                is_completion = any(keyword in user_message.lower() for keyword in completion_keywords)
+
+                if is_completion:
+                    logger.info("Detected completion/thank you message from ticket creator")
+                    say(
+                        text="You're welcome! Glad we could help. If you need anything else, feel free to post a new message in this channel. Have a great day! 🎉",
+                        thread_ts=thread_ts
+                    )
+                    return
 
                 # Build conversation context
                 context_messages = []
