@@ -66,10 +66,10 @@ THEGUARANTORS_TOOLS = """
 def get_similar_past_tickets(client, channel_id, user_message, limit=5):
     """Search past IT tickets for similar issues and resolutions"""
     try:
-        # Get recent messages from the channel (last 100 messages)
+        # Get recent messages from the channel (last 200 messages)
         history = client.conversations_history(
             channel=channel_id,
-            limit=100
+            limit=200
         )
 
         # Look for threads that might contain resolutions
@@ -166,22 +166,47 @@ def handle_message_events(event, say, client):
                             assignee_mention = f"<@{assignee_user_id}>"
 
                 # Only respond to the ORIGINAL ticket creator, not assignee or other users
+                if original_creator is None:
+                    logger.info("Could not determine original creator, not responding")
+                    return
+
                 if current_user != original_creator:
                     logger.info(f"Message from non-creator ({current_user}), not responding. Original creator: {original_creator}")
                     return
 
-                # Check if this is a "thank you" / "got access" / completion message
-                completion_keywords = ["thank you", "thanks", "got it", "works now", "working now",
-                                      "all good", "all set", "have access", "got access", "resolved",
-                                      "fixed", "working", "perfect", "great", "awesome", "appreciate",
-                                      "sorted", "done", "completed", "solved"]
+                # Also check if current user is the assignee - don't respond to IT team
+                if assignee_user_id and current_user == assignee_user_id:
+                    logger.info(f"Message from assignee ({current_user}), not responding")
+                    return
 
-                is_completion = any(keyword in user_message.lower() for keyword in completion_keywords)
+                # Check for CLEAR completion messages (fully resolved, no "but" or continuation)
+                # Only trigger on simple thank you messages without additional context
+                message_lower = user_message.lower().strip()
 
-                if is_completion:
-                    logger.info("Detected completion/thank you message from ticket creator")
+                # Simple completion phrases (short, standalone thank you messages)
+                simple_completions = [
+                    "thank you", "thanks", "thanks!", "thank you!", "ty", "thx",
+                    "got it", "got it!", "all good", "all set", "perfect", "awesome",
+                    "works now", "working now", "it works", "that worked", "fixed it",
+                    "resolved", "sorted", "done", "completed", "solved"
+                ]
+
+                # Check if it's a SIMPLE completion (short message, no "but", "however", "still", etc.)
+                continuation_words = ["but", "however", "still", "although", "though", "except",
+                                     "issue", "problem", "not", "doesn't", "don't", "can't", "won't",
+                                     "half", "part", "other", "another", "also", "and"]
+
+                is_simple_completion = (
+                    any(message_lower == phrase or message_lower == phrase + "!" for phrase in simple_completions) or
+                    (len(message_lower.split()) <= 5 and
+                     any(phrase in message_lower for phrase in simple_completions) and
+                     not any(word in message_lower for word in continuation_words))
+                )
+
+                if is_simple_completion:
+                    logger.info("Detected simple completion/thank you message from ticket creator")
                     say(
-                        text="You're welcome! Glad we could help. If you need anything else, feel free to post a new message in this channel. Have a great day! 🎉",
+                        text="You're welcome! Glad we could help. If you need anything else, feel free to post a new message in this channel. Have a great day!",
                         thread_ts=thread_ts
                     )
                     return
@@ -205,21 +230,29 @@ def handle_message_events(event, say, client):
 
 {THEGUARANTORS_TOOLS}
 
-Your goals:
+**CONVERSATION INTELLIGENCE:**
+1. CAREFULLY read what the user is saying - understand the FULL context
+2. If user says "half fixed", "part of it works", "one issue resolved but another remains" - acknowledge what's fixed AND help with what's NOT fixed
+3. If user mentions multiple issues, track ALL of them and address each one
+4. If user gives partial feedback (e.g., "the VPN works now but email is still broken"), celebrate the win and troubleshoot the remaining issue
+5. NEVER assume the issue is fully resolved unless user CLEARLY says everything is working
+6. If user says "thanks but..." or "fixed but..." - this is NOT a completion, they still need help
+
+**Your goals:**
 1. Have a helpful, friendly conversational dialogue (not robotic) - represent TheGuarantors' supportive culture
 2. Ask clarifying questions to understand the problem better
 3. Provide troubleshooting specific to TheGuarantors' tech stack (Okta, Gmail, Jamf, 1Password, AWS ClientVPN, etc.)
 4. Remember what they've already tried (from conversation history)
-5. If the issue persists after troubleshooting, or seems complex, or user is uncertain, ALWAYS suggest escalation
-6. When escalating, say: "Let me escalate this to TheGuarantors IT team who can help you further."
+5. Track multiple issues if user mentions them - don't lose context
+6. If the issue persists after troubleshooting, or seems complex, or user is uncertain, suggest escalation
 
 **IMPORTANT RULES:**
 - NEVER suggest: creating a ticket, emailing IT, reaching out, or contacting external support
 - ONLY mention: TheGuarantors IT team (never "the IT team" - always "TheGuarantors IT team")
 - For escalation: ONLY suggest using the thumbs down emoji (👎)
 
-Be conversational, empathetic, and helpful. Keep responses concise (3-5 sentences max).
-After 2-3 failed attempts or when user seems stuck, always escalate."""
+Be conversational, empathetic, and helpful. Keep responses concise but thorough.
+After 2-3 failed attempts or when user seems stuck, suggest escalation."""
                 })
 
                 # Add current user message
@@ -233,7 +266,7 @@ After 2-3 failed attempts or when user seems stuck, always escalate."""
                     model="gpt-4o-mini",
                     messages=context_messages,
                     temperature=0.7,
-                    max_tokens=400
+                    max_tokens=600
                 )
 
                 chat_response = response.choices[0].message.content

@@ -15,11 +15,11 @@ def analyze_slack_history(client, channel_id, days=7):
         start_time = end_time - timedelta(days=days)
         start_ts = start_time.timestamp()
 
-        # Fetch messages from Slack
+        # Fetch messages from Slack (increased limit for better analysis)
         result = client.conversations_history(
             channel=channel_id,
             oldest=str(start_ts),
-            limit=1000
+            limit=2000
         )
 
         messages = result.get("messages", [])
